@@ -12,6 +12,10 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 pacman::p_load('dplyr', 'tidyverse')
 library(tidyverse)
+library(opencage)
+library(tidyverse)
+library(leaflet)
+library(stringr)
 ```
 
 
@@ -21,8 +25,9 @@ adress <- read_csv('data/preprocessed/ALL_adresser_p.csv')
 
 ```
 
-```{r}
+Ensuring that an adress has been gathered for all schools:
 
+```{r}
 
 df$got_adress <- ifelse(df$Institutionsnummer %in% adress$Institutionsnummer, 1, 0)
 
@@ -32,15 +37,6 @@ unique(missing$Institution)
 unique(missing$Institutionsnummer)
 ```
 
-```{r}
-
-df2$got_adress <- ifelse(df2$Institutionsnummer %in% adress$Institutionsnummer, 1, 0)
-
-missing2 <- df2 %>% filter(got_adress == 0)
-
-unique(missing2$Institution)
-unique(missing2$Institutionsnummer)
-```
 
 Now, i can merge the datasets:
 
@@ -57,13 +53,9 @@ df <- df %>%
 df3 <- df %>% left_join(adress, by = 'Institutionsnummer')
 ```
 
-Now, i will try to get the coordinates from the adresses:
+Getting the coordinates from the adresses:
 
 ```{r}
-library(opencage)
-library(tidyverse)
-library(leaflet)
-library(stringr)
 
 df3$location1 <- str_c(df3$Adresse, ', ', df3$Postnummer)
 df3$location <- str_c(df3$location1, ' ', df3$By)
@@ -72,15 +64,6 @@ locations <- as.data.frame(unique(df3$location))
 locations <- locations %>% 
   rename('location' = 'unique(df3$location)')
 
-
-# see configuration options
-#help(oc_config)
-
-# set key in the environment
-Sys.setenv(OPENCAGE_KEY = "a7919189d4134270a7d212e72d9ecd82")
-
-# set the key interactively if it is missing.
-oc_config('a7919189d4134270a7d212e72d9ecd82')
 ```
 
 ```{r}
@@ -91,7 +74,7 @@ GYM_locations <- df3 %>% left_join(s)
 #write.csv(GYM_locations,"GYM_locations.csv", row.names = FALSE)
 
 ```
-
+Add this one manually: Prins Henriks Skole, Lycee Francais De Copenhague
 
 repeating the proccess with the EUD educations:
 

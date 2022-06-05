@@ -1,0 +1,493 @@
+---
+title: "analysis"
+author: "Sarah Hvid Andersen"
+date: "31/5/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+pacman::p_load('dplyr', 'tidyverse', 'paletteer')
+library(opencage)
+library(tidyverse)
+library(leaflet)
+library(knitr)
+library(rmdformats)
+library(raster)
+library(tidyverse)
+library(sf)
+library(mapview)
+library(raster)
+library(mapboxapi)
+library(dplyr)
+
+# set key in the environment
+#Sys.setenv(OPENCAGE_KEY = "a7919189d4134270a7d212e72d9ecd82")
+
+# set the key interactively if it is missing.
+#oc_config('a7919189d4134270a7d212e72d9ecd82')
+```
+
+
+```{r}
+df <- read.csv('data/preprocessed/GYM_locations.csv')
+```
+
+specify a year to focus the analysis on. initially i'll choose 2018/2019 to circumvent any covid related effects. 
+```{r}
+
+df <- df %>% 
+  dplyr::select(Mellemgruppe, Institution.x, Institutionsnummer, Institutions.beliggenhedskommune, oc_formatted, oc_lng, oc_lat, X2018.2019, Kommune, Region) %>% 
+  rename(Institution = Institution.x,
+         Institution_mun = Institutions.beliggenhedskommune,
+         long = oc_lng,
+         lat = oc_lat,
+         Stud_18 = X2018.2019) %>% 
+  mutate(Mellemgruppe = as.factor(Mellemgruppe))
+
+df <- df %>% 
+  filter_at(vars(Stud_18), any_vars(!is.na(.)))
+
+df$lat[df$Institution == 'Prins Henriks Skole, Lycee Francais De Copenhague'] <- 55.673920
+df$long[df$Institution == 'Prins Henriks Skole, Lycee Francais De Copenhague'] <- 12.548066
+df$oc_formatted[df$Institution == 'Prins Henriks Skole, Lycee Francais De Copenhague'] <- 'Frederiksberg Allé 22A, 1820 Frederiksberg'
+
+```
+
+
+```{r}
+# create dfs for different layers:
+df_gyms <- distinct(df, Institutionsnummer, Mellemgruppe, .keep_all = TRUE)
+
+# Convert to sf object
+df_sf <- st_as_sf(df_gyms, coords = c("long", "lat"), crs = 4326)# %>% 
+  #st_transform(crs = 25832)
+
+# Cycling range
+cycling_isos <- mb_isochrone(
+  df_sf,
+  profile = "cycling",
+  time = 20,
+  id = "oc_formatted"
+)
+
+# Driving range
+driving_isos <- mb_isochrone(
+  df_sf,
+  profile = "driving",
+  time = 20,
+  id = "oc_formatted"
+)
+
+# A vector of isochrone contours, specified in minutes. Defaults to c(5,10,15).
+#The maximum time supported is 60 minutes. Reflects traffic conditions for the
+#date and time at which the function is called. If reproducibility of isochrones is
+#required, supply an argument to the depart_at parameter
+# - called 31/05 around noon. so not during rush hour
+```
+
+grab isochrones by gymnasium type:
+```{r}
+# merge by id and oc_formatted
+df_hf <- df_gyms %>% filter(Mellemgruppe == 'Hf') %>% 
+  rename(id = oc_formatted)
+df_hf <- df_hf %>% left_join(driving_isos, by = 'id')
+
+# STX
+df_stx <- df_gyms %>% filter(Mellemgruppe == 'Stx') %>% 
+  rename(id = oc_formatted)
+df_stx <- df_stx %>% left_join(driving_isos, by = 'id')
+
+# HTX
+df_htx <- df_gyms %>% filter(Mellemgruppe == 'Htx') %>% 
+  rename(id = oc_formatted)
+df_htx <- df_htx %>% left_join(driving_isos, by = 'id')
+
+# HHX
+df_hhx <- df_gyms %>% filter(Mellemgruppe == 'Hhx') %>% 
+  rename(id = oc_formatted)
+df_hhx <- df_hhx %>% left_join(driving_isos, by = 'id')
+```
+
+visualize isochrones:
+```{r}
+map <- leaflet() %>% 
+  addTiles()
+
+
+# shows that it is not possible to avoid public transportation or having a car for many
+map %>%
+  addPolygons(data=cycling_isos, color = "green", opacity = 0.2) %>% 
+      addCircleMarkers(df_gyms$long, df_gyms$lat, 
+                   radius = 4,
+                   popup = df_gyms$Institution)
+
+map %>%
+   addPolygons(data=driving_isos, opacity = 0.2, group = 'drive_time') %>% 
+    addCircleMarkers(df_gyms$long, df_gyms$lat, 
+                   radius = 4,
+                   color = 'black',
+                   popup = df_gyms$Institution) %>% 
+  addLayersControl(
+    overlayGroups = c('drive_time'),
+    options = layersControlOptions(collapsed = FALSE)
+  )
+
+
+map %>%
+  # add stx
+    addPolygons(data=df_stx$geometry, 
+               color = "red", 
+               opacity = 0.2, 
+               group = 'stx') %>% 
+    addCircleMarkers(df_stx$long, df_stx$lat, 
+                   radius = 4,
+                   color = 'red',
+                   fill = T,
+                   popup = df_stx$Institution,
+                   group = 'stx') %>% 
+  
+  # add HF
+  addPolygons(data=df_hf$geometry, 
+               color = "orange", 
+               opacity = 0.2, 
+               group = 'hf') %>% 
+      addCircleMarkers(df_hf$long, df_hf$lat, 
+                   radius = 4,
+                   color = 'orange',
+                   fill = T,
+                   popup = df_hf$Institution,
+                   group = 'hf') %>% 
+  
+  # add HTX
+      addPolygons(data=df_htx$geometry, 
+               color = "green", 
+               opacity = 0.2, 
+               group = 'htx') %>% 
+    addCircleMarkers(df_htx$long, df_htx$lat, 
+                   radius = 4,
+                   color = 'green',
+                   fill = T,
+                   popup = df_htx$Institution,
+                   group = 'htx') %>% 
+  
+  # add HHX
+      addPolygons(data=df_hhx$geometry, 
+               color = "blue", 
+               opacity = 0.2, 
+               group = 'hhx') %>% 
+    addCircleMarkers(df_hhx$long, df_hhx$lat, 
+                   radius = 4,
+                   color = 'blue',
+                   fill = T,
+                   fillOpacity = 0.5,
+                   popup = df_hhx$Institution,
+                   group = 'hhx') %>%  
+  
+  #addPolylines(data=municipalities_sf,
+   #                  color = 'black',
+    #                 label = municipalities_sf$NAME_2) %>% 
+  # add layer control
+  addLayersControl(
+    overlayGroups = c('stx', 'hf', 'htx', 'hhx'),
+    options = layersControlOptions(collapsed = FALSE)
+  )
+
+
+```
+
+getting municipality polygons:
+
+```{r}
+municipalities <- getData("GADM", country = "DNK", level = 2)
+
+municipalities_sf <- st_transform(st_as_sf(municipalities), crs = 4326)
+
+municipalities_sf <- municipalities_sf %>% 
+  mutate(NAME_2 = gsub("Århus", "Aarhus", NAME_2)) %>% 
+  mutate(NAME_2 = gsub("Høje Taastrup", "Høje-Taastrup", NAME_2)) %>% 
+  mutate(NAME_2 = gsub("Vesthimmerland", "Vesthimmerlands", NAME_2))
+
+# OBS NAME DIFFERENCES
+municipalities_sf$ch <- ifelse(municipalities_sf$NAME_2 %in% Mun_summary$Kommune, 1, 0)
+Mun_summary$ch <- ifelse(Mun_summary$Kommune %in% municipalities_sf$NAME_2, 1, 0)
+
+missing <- municipalities_sf %>% filter(ch == 0)
+missing$NAME_2
+
+missing <- Mun_summary %>% filter(ch == 0)
+missing$Kommune
+####################################
+
+map %>% addPolylines(data=municipalities_sf,
+                     color = 'grey',
+                     label = municipalities_sf$NAME_2)
+
+```
+
+getting some stats
+
+```{r}
+# get unique column
+df$Education <- paste(df$Institution, df$Mellemgruppe)
+
+# calculate sum of entries by education
+Education_summary <- df %>% 
+  group_by(Education) %>% 
+  summarise(Education_sum = sum(Stud_18))
+
+df <- df %>% left_join(Education_summary, by = 'Education')
+
+df <- df %>% mutate(Education_percent = round((Stud_18 / Education_sum), digits = 3))
+
+# do the same by municipality
+Mun_summary <- df %>% 
+  group_by(Kommune) %>% 
+  summarise(Mun_sum = sum(Stud_18))
+
+df <- df %>% left_join(Mun_summary, by = 'Kommune')
+
+df <- df %>% mutate(Mun_percent = round((Stud_18 / Mun_sum), digits = 3))
+
+# percent of municipality that chose which mellemgruppe
+df$Kom_mel <- paste(df$Kommune, df$Mellemgruppe)
+
+Group_summary <- df %>% 
+  group_by(Kom_mel) %>% 
+  summarise(Mun_mel_sum = sum(Stud_18))
+
+df <- df %>% left_join(Group_summary, by = 'Kom_mel')
+
+df <- df %>% mutate(Mun_mel_percent = round((Mun_mel_sum / Mun_sum), digits = 3))
+
+```
+
+plot showing the distribution of group chosen by municipality
+
+```{r}
+df %>% filter(Region == 'Region Sjælland') %>% 
+  ggplot(aes(fill=Mellemgruppe, y=Mun_mel_percent, x=Kommune)) + 
+  geom_bar(position="fill", stat="identity")
+
+```
+
+get distance from municipality (coord) to the nearest edu group
+
+```{r}
+# paste
+municipalities_sf$location <- paste(municipalities_sf$NAME_2, municipalities_sf$ENGTYPE_2, sep = ' ')
+
+mun_coords <- oc_forward_df(municipalities_sf,
+                           placename = location, countrycode = "DK", limit =1, no_annotations = TRUE)
+
+#st_write(mun_coords, "data/preprocessed/mun_coord.shp")
+#mun_coords = st_read("data/preprocessed/mun_coord.shp")
+
+# correcting coordinates
+mun_coords$oc_lat[mun_coords$NAME_2 == 'Bornholm'] <- 55.123448
+mun_coords$oc_lng[mun_coords$NAME_2 == 'Bornholm'] <- 14.909327
+
+mun_coords$oc_lat[mun_coords$NAME_2 == 'Fanø'] <- 55.415258
+mun_coords$oc_lng[mun_coords$NAME_2 == 'Fanø'] <- 8.403257
+
+mun_coords$oc_lat[mun_coords$NAME_2 == 'Kerteminde'] <- 55.460983
+mun_coords$oc_lng[mun_coords$NAME_2 == 'Kerteminde'] <- 10.644460
+
+mun_coords$oc_lat[mun_coords$NAME_2 == 'Odense'] <- 55.401549
+mun_coords$oc_lng[mun_coords$NAME_2 == 'Odense'] <- 10.374097
+
+mun_coords$oc_lat[mun_coords$NAME_2 == 'Lejre'] <- 55.632084
+mun_coords$oc_lng[mun_coords$NAME_2 == 'Lejre'] <- 11.874893
+ 
+
+mun_coords_df <- mun_coords %>% 
+  dplyr::select(NAME_2, oc_lat, oc_lng) %>% 
+  rename(Kommune = NAME_2)
+
+mun_coords_df <- as.data.frame(mun_coords_df) %>% 
+  dplyr::select(-c(geometry))
+
+ 
+# create merge by 'kommune', for distance calculation
+
+df <- df %>% left_join(mun_coords_df, by = 'Kommune')
+
+
+# plot
+map %>% 
+      addCircleMarkers(mun_coords$oc_lng, mun_coords$oc_lat, 
+                   radius = 4,
+                   color = 'black',
+                   popup = mun_coords$NAME_2) %>% 
+    addPolylines(data=municipalities_sf,
+                     color = 'grey',
+                     label = municipalities_sf$NAME_2)
+
+```
+
+mapbox tests
+```{r}
+
+my_route <- mb_directions(
+  origin = c(9.746769, 55.057707),
+  destination = c(9.794516, 54.907495),
+  profile = "driving"
+)
+
+my_route <- mb_directions(
+  origin = "10 Avenue de Wagram, 75008 Paris France",
+  destination = "59 Rue de Tocqueville, 75017 Paris France",
+  profile = "driving"
+)
+
+
+library(mapboxapi)
+library(tigris)
+library(mapdeck)
+
+mapdeck(style = mapdeck_style("light")) %>%
+  add_polygon(
+data = big_data,
+polyline = 'geometry',
+fill_colour = "distance",
+fill_opacity = 0.6,
+legend = TRUE)
+
+```
+
+i want the distance from a municipality and to the nearest school of each group type (hf, stx, hhx, htx)
+- create a dataframe with school coordinates and the municipality of pupil admission coordinates (kommune column). get the distance for each of these. 
+
+```{r}
+
+df_small <- df[1:5,]
+
+var_list = list()
+dist_list = list()
+
+len <- nrow(df_small)
+
+start_time <- Sys.time()
+for (row in 1:nrow(df_small)) {
+    school_long <- df_small[row, "long"]
+    school_lat  <- df_small[row, "lat"]
+    school_name <- df_small[row, "Institution"]
+    
+    kom_long <- df_small[row, "oc_lng"]
+    kom_lat  <- df_small[row, "oc_lat"]
+    kom_name <- df_small[row, "Kommune"]
+    
+    cat(school_name,'------>', kom_name, '\n')
+    print(row + 1)
+
+    route <- mb_directions(
+      origin = c(school_long, school_lat),
+      destination = c(kom_long, kom_lat),
+      profile = "driving")
+    
+    dist_list[[row]] <- route
+    var_list[[row]] <- c(school_name, kom_name)
+}
+end_time <- Sys.time()
+end_time - start_time
+
+# for the big dataframe, need to drop nas, where the living mun was unspecified
+df <- df %>% drop_na(oc_lng)
+
+var_list = list()
+dist_list = list()
+
+# for loop takes 3.1 minute to run. times taken at 22 evening, no rush hour
+# could be nice to specify monday morning at 7 o clock
+start_time <- Sys.time()
+for (row in 1:nrow(df)) {
+    school_long <- df[row, "long"]
+    school_lat  <- df[row, "lat"]
+    school_name <- df[row, "Institution"]
+    
+    kom_long <- df[row, "oc_lng"]
+    kom_lat  <- df[row, "oc_lat"]
+    kom_name <- df[row, "Kommune"]
+    
+    cat(school_name,'------>', kom_name, '\n')
+    print(row +1)
+
+    route <- mb_directions(
+      origin = c(school_long, school_lat),
+      destination = c(kom_long, kom_lat),
+      profile = "driving")
+    
+    dist_list[[row]] <- route
+    var_list[[row]] <- c(school_name, kom_name)
+}
+end_time <- Sys.time()
+end_time - start_time
+
+
+# gather the results into one SF dataframe
+var_df <- do.call(rbind, var_list) %>%
+  as.data.frame()
+
+dist_sf <- dplyr::bind_rows(dist_list)
+
+df3 <- as.data.frame(dist_sf) %>% 
+  dplyr::select(-geometry)
+
+df <- cbind(df, df3)
+
+dist_sf <- cbind(dist_sf, var_df)
+
+#st_write(dist_df, "data/preprocessed/dist_school_mun.shp")
+#write.csv(df, "data/preprocessed/all_distances_GYM.csv")
+
+#########
+
+map %>% 
+      addCircleMarkers(df_small$long, df_small$lat, 
+                   radius = 4,
+                   color = 'black',
+                   popup = df_small$Institution) %>% 
+  
+  addPolylines(data=dist_df, color = "green", opacity = 1) %>% 
+  
+  addPolylines(data=municipalities_sf,
+                     color = 'grey',
+                     label = municipalities_sf$NAME_2)
+
+
+```
+
+what is the minimum travel time to each education, by municipality?
+```{r}
+# creating a df that only keeps the min distance values for each municipality and group
+df_min <- df %>% 
+  group_by(Kommune, Mellemgruppe)%>% 
+  slice(which.min(duration))
+
+# plotting with the percentage of the municipality that chose which group
+df_min_nj <- df_min %>% filter(Region == 'Region Nordjylland')
+
+ggplot(data = NULL, aes(group = Mellemgruppe)) +
+  geom_bar(data=df_min_nj, 
+           aes(fill=Mellemgruppe, y=duration, x=Kommune), position="dodge", stat="identity") +
+  geom_point(data=df_min_nj, 
+             aes(y=Mun_mel_percent*15, x=Kommune, group=Mellemgruppe), position = position_dodge(width = 0.9), shape=3, size=4, show.legend=FALSE) +
+  ggtitle('The minimum driving duration to each education type from each municipality')
+
+
+
+df_min_nj <- df_min %>% filter(Region == 'Region Syddanmark')
+
+ggplot(data = NULL, aes(group = Mellemgruppe)) +
+  geom_bar(data=df_min_nj, 
+           aes(fill=Mellemgruppe, y=duration, x=Kommune), position="dodge", stat="identity") +
+  geom_point(data=df_min_nj, 
+             aes(y=Mun_mel_percent*15, x=Kommune, group=Mellemgruppe), position = position_dodge(width = 0.9), shape=3, size=4, show.legend=FALSE) +
+  ggtitle('The minimum driving duration to each education type from each municipality')
+
+
+```
+
