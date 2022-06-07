@@ -13,10 +13,17 @@ knitr::opts_chunk$set(echo = TRUE)
 pacman::p_load('dplyr', 'tidyverse', 'opencage', 'raster', 'rgeos', 'leaflet', 'sf', 'mapboxapi')
 
 # set key in the environment
-Sys.setenv(OPENCAGE_KEY = '')
+#Sys.setenv(OPENCAGE_KEY = '')
 # set the key interactively if it is missing.
-oc_config('')
+#oc_config('')
 ```
+
+```{r, echo = FALSE}
+Sys.setenv(OPENCAGE_KEY = "a7919189d4134270a7d212e72d9ecd82")
+# set the key interactively if it is missing.
+oc_config('a7919189d4134270a7d212e72d9ecd82')
+```
+
 
 Loading the raw data:
 
@@ -54,7 +61,7 @@ Getting the coordinates from the addresses:
 
 ```{r}
 # concatenating strings to get the full address in one column
-df3$location1 <- str_c(df3$addresse, ', ', df3$Postnummer)
+df3$location1 <- str_c(df3$Adresse, ', ', df3$Postnummer)
 df3$location <- str_c(df3$location1, ' ', df3$By)
 
 locations <- as.data.frame(unique(df3$location))
@@ -66,13 +73,13 @@ s <- oc_forward_df(locations, placename = location, countrycode = "DK", limit = 
 GYM_locations <- df3 %>% left_join(s)
 
 # saving the results
-write.csv(GYM_locations,"GYM_locations.csv", row.names = FALSE)
+write_csv(GYM_locations,"data/preprocessed/GYM_locations.csv")
 ```
 
 Repeating the process with the VET educations:
 
 ```{r}
-df <- read.csv('EUD_grundforlob1_grupper_p.csv', sep = ';', encoding = 'UTF-8')
+df <- read.csv('data/preprocessed/EUD_grundforlob1_grupper_p.csv', sep = ';', encoding = 'UTF-8')
 
 df <- df %>% 
   rename('Hovedområde' = 'X.U.FEFF.Hovedområde') %>% 
@@ -84,7 +91,7 @@ df <- df %>%
 
 df3 <- df %>% left_join(address, by = 'Institutionsnummer')
 
-df3$location1 <- str_c(df3$addresse, ', ', df3$Postnummer)
+df3$location1 <- str_c(df3$Adresse, ', ', df3$Postnummer)
 df3$location <- str_c(df3$location1, ', ', df3$By)
 
 locations <- as.data.frame(unique(df3$location))
@@ -94,14 +101,14 @@ locations <- locations %>%
 s2 <- oc_forward_df(locations, placename = location, countrycode = "DK", limit =1, no_annotations = TRUE)
 EUD_locations <- df3 %>% left_join(s2)
 
-write.csv(EUD_locations,"EUD_locations.csv", row.names = FALSE)
+write_csv(EUD_locations,"data/preprocessed/EUD_locations.csv")
 ```
 
 Reloading the data for further analysis
 
 ```{r}
-df_gym <- read.csv('data/preprocessed/GYM_locations.csv')
-df_eud <- read.csv('data/preprocessed/EUD_locations.csv')
+df_gym <- read.csv('data/preprocessed/GYM_locations.csv', encoding = 'UTF-8')
+df_eud <- read.csv('data/preprocessed/EUD_locations.csv', encoding = 'UTF-8')
 ```
 
 specify a year to focus the analysis on. I've chosen 2018/2019 to circumvent any covid related effects. 
@@ -127,6 +134,7 @@ df_gym$oc_formatted[df_gym$Institution == 'Prins Henriks Skole, Lycee Francais D
 
 ```
 
+For the VET educations:
 ```{r}
 # selecting the useful columns and rows
 df_eud <- df_eud %>% 
