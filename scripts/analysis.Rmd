@@ -10,37 +10,106 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r}
-pacman::p_load('dplyr', 'tidyverse', 'paletteer')
-library(opencage)
-library(tidyverse)
-library(leaflet)
-library(knitr)
-library(rmdformats)
-library(raster)
-library(tidyverse)
-library(sf)
-library(mapview)
-library(raster)
-library(mapboxapi)
-library(dplyr)
+pacman::p_load('dplyr', 'tidyverse', 'opencage', 'raster', 'rgeos', 'leaflet', 'sf', 'mapboxapi')
 
 # set key in the environment
-#Sys.setenv(OPENCAGE_KEY = "a7919189d4134270a7d212e72d9ecd82")
-
+Sys.setenv(OPENCAGE_KEY = "a7919189d4134270a7d212e72d9ecd82")
 # set the key interactively if it is missing.
-#oc_config('a7919189d4134270a7d212e72d9ecd82')
+oc_config('a7919189d4134270a7d212e72d9ecd82')
+```
+
+Loading the raw data:
+
+```{r}
+df <- read.csv('data/preprocessed/GYM_alle_p.csv', sep = ';', encoding = 'UTF-8')
+address <- read_csv('data/preprocessed/ALL_adresser_p.csv')
+```
+
+Ensuring that an address has been gathered for all schools:
+
+```{r}
+df$got_address <- ifelse(df$Institutionsnummer %in% address$Institutionsnummer, 1, 0)
+
+missing <- df %>% filter(got_address == 0)
+
+unique(missing$Institution)
+unique(missing$Institutionsnummer)
 ```
 
 
-```{r}
-df <- read.csv('data/preprocessed/GYM_locations.csv')
-```
+Merging the datasets:
 
-specify a year to focus the analysis on. initially i'll choose 2018/2019 to circumvent any covid related effects. 
 ```{r}
+df <- df %>% 
+  rename('Hovedområde' = 'X.U.FEFF.Hovedområde') %>% 
+  rename_with( ~ gsub("X", "", .x, fixed = TRUE)) %>% 
+  rename_with( ~ gsub(".", "-", .x, fixed = TRUE))
 
 df <- df %>% 
-  dplyr::select(Mellemgruppe, Institution.x, Institutionsnummer, Institutions.beliggenhedskommune, oc_formatted, oc_lng, oc_lat, X2018.2019, Kommune, Region) %>% 
+  filter_at(vars(`2012-2013`,`2013-2014`,`2014-2015`, `2015-2016`, `2016-2017`, `2017-2018`, `2018-2019`, `2019-2020`, `2020-2021`, `2021-2022`), any_vars(!is.na(.)))
+
+df3 <- df %>% left_join(address, by = 'Institutionsnummer')
+```
+
+Getting the coordinates from the addresses:
+
+```{r}
+# concatenating strings to get the full address in one column
+df3$location1 <- str_c(df3$addresse, ', ', df3$Postnummer)
+df3$location <- str_c(df3$location1, ' ', df3$By)
+
+locations <- as.data.frame(unique(df3$location))
+locations <- locations %>% 
+  rename('location' = 'unique(df3$location)')
+
+# geocoding the locations
+s <- oc_forward_df(locations, placename = location, countrycode = "DK", limit = 1, no_annotations = TRUE)
+GYM_locations <- df3 %>% left_join(s)
+
+# saving the results
+write.csv(GYM_locations,"GYM_locations.csv", row.names = FALSE)
+```
+
+Repeating the process with the VET educations:
+
+```{r}
+df <- read.csv('EUD_grundforlob1_grupper_p.csv', sep = ';', encoding = 'UTF-8')
+
+df <- df %>% 
+  rename('Hovedområde' = 'X.U.FEFF.Hovedområde') %>% 
+  rename_with( ~ gsub("X", "", .x, fixed = TRUE)) %>% 
+  rename_with( ~ gsub(".", "-", .x, fixed = TRUE))
+
+df <- df %>% 
+  filter_at(vars(`2015-2016`, `2016-2017`, `2017-2018`, `2018-2019`, `2019-2020`, `2020-2021`, `2021-2022`), any_vars(!is.na(.)))
+
+df3 <- df %>% left_join(address, by = 'Institutionsnummer')
+
+df3$location1 <- str_c(df3$addresse, ', ', df3$Postnummer)
+df3$location <- str_c(df3$location1, ', ', df3$By)
+
+locations <- as.data.frame(unique(df3$location))
+locations <- locations %>% 
+  rename('location' = 'unique(df3$location)')
+
+s2 <- oc_forward_df(locations, placename = location, countrycode = "DK", limit =1, no_annotations = TRUE)
+EUD_locations <- df3 %>% left_join(s2)
+
+write.csv(EUD_locations,"EUD_locations.csv", row.names = FALSE)
+```
+
+Reloading the data for further analysis
+
+```{r}
+df_gym <- read.csv('data/preprocessed/GYM_locations.csv')
+df_eud <- read.csv('data/preprocessed/EUD_locations.csv')
+```
+
+specify a year to focus the analysis on. I've chosen 2018/2019 to circumvent any covid related effects. 
+```{r}
+# selecting the useful columns and rows
+df_gym <- df_gym %>% 
+  dplyr::select(Hovedområde, Mellemgruppe, Institution.x, Institutionsnummer, Institutions.beliggenhedskommune, oc_formatted, oc_lng, oc_lat, X2018.2019, Kommune, Region) %>% 
   rename(Institution = Institution.x,
          Institution_mun = Institutions.beliggenhedskommune,
          long = oc_lng,
@@ -48,160 +117,45 @@ df <- df %>%
          Stud_18 = X2018.2019) %>% 
   mutate(Mellemgruppe = as.factor(Mellemgruppe))
 
-df <- df %>% 
+df_gym <- df_gym %>% 
   filter_at(vars(Stud_18), any_vars(!is.na(.)))
 
-df$lat[df$Institution == 'Prins Henriks Skole, Lycee Francais De Copenhague'] <- 55.673920
-df$long[df$Institution == 'Prins Henriks Skole, Lycee Francais De Copenhague'] <- 12.548066
-df$oc_formatted[df$Institution == 'Prins Henriks Skole, Lycee Francais De Copenhague'] <- 'Frederiksberg Allé 22A, 1820 Frederiksberg'
+
+# manually registering coordinates for a school missing results
+df_gym$lat[df_gym$Institution == 'Prins Henriks Skole, Lycee Francais De Copenhague'] <- 55.673920
+df_gym$long[df_gym$Institution == 'Prins Henriks Skole, Lycee Francais De Copenhague'] <- 12.548066
+df_gym$oc_formatted[df_gym$Institution == 'Prins Henriks Skole, Lycee Francais De Copenhague'] <- 'Frederiksberg Allé 22A, 1820 Frederiksberg'
 
 ```
 
-
 ```{r}
-# create dfs for different layers:
-df_gyms <- distinct(df, Institutionsnummer, Mellemgruppe, .keep_all = TRUE)
 
-# Convert to sf object
-df_sf <- st_as_sf(df_gyms, coords = c("long", "lat"), crs = 4326)# %>% 
-  #st_transform(crs = 25832)
+# selecting the useful columns and rows
+df_eud <- df_eud %>% 
+    mutate(Gruppe = Undergruppe) %>% 
+  dplyr::select(Hovedområde, Undergruppe, Gruppe, Institution.x, Institutionsnummer, Institutions.beliggenhedskommune, oc_formatted, oc_lng, oc_lat, X2018.2019, Kommune, Region) %>% 
+  rename(Institution = Institution.x,
+         Institution_mun = Institutions.beliggenhedskommune,
+         long = oc_lng,
+         lat = oc_lat,
+         Stud_18 = X2018.2019)
 
-# Cycling range
-cycling_isos <- mb_isochrone(
-  df_sf,
-  profile = "cycling",
-  time = 20,
-  id = "oc_formatted"
-)
+# creating abreviation (from the English names)
+df_eud$Gruppe[df_eud$Gruppe == 'Fødevarer, jordbrug og oplevelser (grundforløb 1)'] <- 'FAH'
+df_eud$Gruppe[df_eud$Gruppe == "Kontor, handel og forretningsservice (grundforløb 1)"] <- 'ACB' 
+df_eud$Gruppe[df_eud$Gruppe == "Omsorg, sundhed og pædagogik (grundforløb 1)"] <- 'CHP'
+df_eud$Gruppe[df_eud$Gruppe == "Teknologi, byggeri og transport (grundforløb 1)"] <- 'TCT'
 
-# Driving range
-driving_isos <- mb_isochrone(
-  df_sf,
-  profile = "driving",
-  time = 20,
-  id = "oc_formatted"
-)
-
-# A vector of isochrone contours, specified in minutes. Defaults to c(5,10,15).
-#The maximum time supported is 60 minutes. Reflects traffic conditions for the
-#date and time at which the function is called. If reproducibility of isochrones is
-#required, supply an argument to the depart_at parameter
-# - called 31/05 around noon. so not during rush hour
-```
-
-grab isochrones by gymnasium type:
-```{r}
-# merge by id and oc_formatted
-df_hf <- df_gyms %>% filter(Mellemgruppe == 'Hf') %>% 
-  rename(id = oc_formatted)
-df_hf <- df_hf %>% left_join(driving_isos, by = 'id')
-
-# STX
-df_stx <- df_gyms %>% filter(Mellemgruppe == 'Stx') %>% 
-  rename(id = oc_formatted)
-df_stx <- df_stx %>% left_join(driving_isos, by = 'id')
-
-# HTX
-df_htx <- df_gyms %>% filter(Mellemgruppe == 'Htx') %>% 
-  rename(id = oc_formatted)
-df_htx <- df_htx %>% left_join(driving_isos, by = 'id')
-
-# HHX
-df_hhx <- df_gyms %>% filter(Mellemgruppe == 'Hhx') %>% 
-  rename(id = oc_formatted)
-df_hhx <- df_hhx %>% left_join(driving_isos, by = 'id')
-```
-
-visualize isochrones:
-```{r}
-map <- leaflet() %>% 
-  addTiles()
-
-
-# shows that it is not possible to avoid public transportation or having a car for many
-map %>%
-  addPolygons(data=cycling_isos, color = "green", opacity = 0.2) %>% 
-      addCircleMarkers(df_gyms$long, df_gyms$lat, 
-                   radius = 4,
-                   popup = df_gyms$Institution)
-
-map %>%
-   addPolygons(data=driving_isos, opacity = 0.2, group = 'drive_time') %>% 
-    addCircleMarkers(df_gyms$long, df_gyms$lat, 
-                   radius = 4,
-                   color = 'black',
-                   popup = df_gyms$Institution) %>% 
-  addLayersControl(
-    overlayGroups = c('drive_time'),
-    options = layersControlOptions(collapsed = FALSE)
-  )
-
-
-map %>%
-  # add stx
-    addPolygons(data=df_stx$geometry, 
-               color = "red", 
-               opacity = 0.2, 
-               group = 'stx') %>% 
-    addCircleMarkers(df_stx$long, df_stx$lat, 
-                   radius = 4,
-                   color = 'red',
-                   fill = T,
-                   popup = df_stx$Institution,
-                   group = 'stx') %>% 
-  
-  # add HF
-  addPolygons(data=df_hf$geometry, 
-               color = "orange", 
-               opacity = 0.2, 
-               group = 'hf') %>% 
-      addCircleMarkers(df_hf$long, df_hf$lat, 
-                   radius = 4,
-                   color = 'orange',
-                   fill = T,
-                   popup = df_hf$Institution,
-                   group = 'hf') %>% 
-  
-  # add HTX
-      addPolygons(data=df_htx$geometry, 
-               color = "green", 
-               opacity = 0.2, 
-               group = 'htx') %>% 
-    addCircleMarkers(df_htx$long, df_htx$lat, 
-                   radius = 4,
-                   color = 'green',
-                   fill = T,
-                   popup = df_htx$Institution,
-                   group = 'htx') %>% 
-  
-  # add HHX
-      addPolygons(data=df_hhx$geometry, 
-               color = "blue", 
-               opacity = 0.2, 
-               group = 'hhx') %>% 
-    addCircleMarkers(df_hhx$long, df_hhx$lat, 
-                   radius = 4,
-                   color = 'blue',
-                   fill = T,
-                   fillOpacity = 0.5,
-                   popup = df_hhx$Institution,
-                   group = 'hhx') %>%  
-  
-  #addPolylines(data=municipalities_sf,
-   #                  color = 'black',
-    #                 label = municipalities_sf$NAME_2) %>% 
-  # add layer control
-  addLayersControl(
-    overlayGroups = c('stx', 'hf', 'htx', 'hhx'),
-    options = layersControlOptions(collapsed = FALSE)
-  )
-
-
+# removing na's
+df_eud <- df_eud %>% 
+  filter_at(vars(Stud_18), any_vars(!is.na(.)))
 ```
 
 getting municipality polygons:
+get distance from municipality (coord) to the nearest edu group
 
 ```{r}
+# downloading municipality data
 municipalities <- getData("GADM", country = "DNK", level = 2)
 
 municipalities_sf <- st_transform(st_as_sf(municipalities), crs = 4326)
@@ -211,80 +165,12 @@ municipalities_sf <- municipalities_sf %>%
   mutate(NAME_2 = gsub("Høje Taastrup", "Høje-Taastrup", NAME_2)) %>% 
   mutate(NAME_2 = gsub("Vesthimmerland", "Vesthimmerlands", NAME_2))
 
-# OBS NAME DIFFERENCES
-municipalities_sf$ch <- ifelse(municipalities_sf$NAME_2 %in% Mun_summary$Kommune, 1, 0)
-Mun_summary$ch <- ifelse(Mun_summary$Kommune %in% municipalities_sf$NAME_2, 1, 0)
-
-missing <- municipalities_sf %>% filter(ch == 0)
-missing$NAME_2
-
-missing <- Mun_summary %>% filter(ch == 0)
-missing$Kommune
-####################################
-
-map %>% addPolylines(data=municipalities_sf,
-                     color = 'grey',
-                     label = municipalities_sf$NAME_2)
-
-```
-
-getting some stats
-
-```{r}
-# get unique column
-df$Education <- paste(df$Institution, df$Mellemgruppe)
-
-# calculate sum of entries by education
-Education_summary <- df %>% 
-  group_by(Education) %>% 
-  summarise(Education_sum = sum(Stud_18))
-
-df <- df %>% left_join(Education_summary, by = 'Education')
-
-df <- df %>% mutate(Education_percent = round((Stud_18 / Education_sum), digits = 3))
-
-# do the same by municipality
-Mun_summary <- df %>% 
-  group_by(Kommune) %>% 
-  summarise(Mun_sum = sum(Stud_18))
-
-df <- df %>% left_join(Mun_summary, by = 'Kommune')
-
-df <- df %>% mutate(Mun_percent = round((Stud_18 / Mun_sum), digits = 3))
-
-# percent of municipality that chose which mellemgruppe
-df$Kom_mel <- paste(df$Kommune, df$Mellemgruppe)
-
-Group_summary <- df %>% 
-  group_by(Kom_mel) %>% 
-  summarise(Mun_mel_sum = sum(Stud_18))
-
-df <- df %>% left_join(Group_summary, by = 'Kom_mel')
-
-df <- df %>% mutate(Mun_mel_percent = round((Mun_mel_sum / Mun_sum), digits = 3))
-
-```
-
-plot showing the distribution of group chosen by municipality
-
-```{r}
-df %>% filter(Region == 'Region Sjælland') %>% 
-  ggplot(aes(fill=Mellemgruppe, y=Mun_mel_percent, x=Kommune)) + 
-  geom_bar(position="fill", stat="identity")
-
-```
-
-get distance from municipality (coord) to the nearest edu group
-
-```{r}
 # paste
 municipalities_sf$location <- paste(municipalities_sf$NAME_2, municipalities_sf$ENGTYPE_2, sep = ' ')
 
+# geocode
 mun_coords <- oc_forward_df(municipalities_sf,
                            placename = location, countrycode = "DK", limit =1, no_annotations = TRUE)
-
-#st_write(mun_coords, "data/preprocessed/mun_coord.shp")
-#mun_coords = st_read("data/preprocessed/mun_coord.shp")
 
 # correcting coordinates
 mun_coords$oc_lat[mun_coords$NAME_2 == 'Bornholm'] <- 55.123448
@@ -302,6 +188,10 @@ mun_coords$oc_lng[mun_coords$NAME_2 == 'Odense'] <- 10.374097
 mun_coords$oc_lat[mun_coords$NAME_2 == 'Lejre'] <- 55.632084
 mun_coords$oc_lng[mun_coords$NAME_2 == 'Lejre'] <- 11.874893
  
+# saving and rereading the results
+
+st_write(mun_coords, "data/preprocessed/mun_coord.shp")
+mun_coords = st_read("data/preprocessed/mun_coord.shp")
 
 mun_coords_df <- mun_coords %>% 
   dplyr::select(NAME_2, oc_lat, oc_lng) %>% 
@@ -310,184 +200,348 @@ mun_coords_df <- mun_coords %>%
 mun_coords_df <- as.data.frame(mun_coords_df) %>% 
   dplyr::select(-c(geometry))
 
- 
-# create merge by 'kommune', for distance calculation
-
-df <- df %>% left_join(mun_coords_df, by = 'Kommune')
-
-
-# plot
-map %>% 
-      addCircleMarkers(mun_coords$oc_lng, mun_coords$oc_lat, 
-                   radius = 4,
-                   color = 'black',
-                   popup = mun_coords$NAME_2) %>% 
-    addPolylines(data=municipalities_sf,
-                     color = 'grey',
-                     label = municipalities_sf$NAME_2)
-
 ```
 
-mapbox tests
-```{r}
-
-my_route <- mb_directions(
-  origin = c(9.746769, 55.057707),
-  destination = c(9.794516, 54.907495),
-  profile = "driving"
-)
-
-my_route <- mb_directions(
-  origin = "10 Avenue de Wagram, 75008 Paris France",
-  destination = "59 Rue de Tocqueville, 75017 Paris France",
-  profile = "driving"
-)
-
-
-library(mapboxapi)
-library(tigris)
-library(mapdeck)
-
-mapdeck(style = mapdeck_style("light")) %>%
-  add_polygon(
-data = big_data,
-polyline = 'geometry',
-fill_colour = "distance",
-fill_opacity = 0.6,
-legend = TRUE)
-
-```
-
-i want the distance from a municipality and to the nearest school of each group type (hf, stx, hhx, htx)
-- create a dataframe with school coordinates and the municipality of pupil admission coordinates (kommune column). get the distance for each of these. 
+Getting the distance from a municipality and to the nearest school of each group type (hf, stx, hhx, htx)
+Creating a dataframe with school coordinates and the municipality of pupil admission coordinates (kommune column) and getting the distance for each of these. 
 
 ```{r}
-
-df_small <- df[1:5,]
-
-var_list = list()
-dist_list = list()
-
-len <- nrow(df_small)
-
-start_time <- Sys.time()
-for (row in 1:nrow(df_small)) {
-    school_long <- df_small[row, "long"]
-    school_lat  <- df_small[row, "lat"]
-    school_name <- df_small[row, "Institution"]
-    
-    kom_long <- df_small[row, "oc_lng"]
-    kom_lat  <- df_small[row, "oc_lat"]
-    kom_name <- df_small[row, "Kommune"]
-    
-    cat(school_name,'------>', kom_name, '\n')
-    print(row + 1)
-
-    route <- mb_directions(
-      origin = c(school_long, school_lat),
-      destination = c(kom_long, kom_lat),
-      profile = "driving")
-    
-    dist_list[[row]] <- route
-    var_list[[row]] <- c(school_name, kom_name)
-}
-end_time <- Sys.time()
-end_time - start_time
+# create merge by kommune for distance calculation
+df_gym <- df_gym %>% left_join(mun_coords_df, by = 'Kommune')
+df_eud <- df_eud %>% left_join(mun_coords_df, by = 'Kommune')
 
 # for the big dataframe, need to drop nas, where the living mun was unspecified
-df <- df %>% drop_na(oc_lng)
+df_gym <- df_gym %>% drop_na(oc_lng)
+df_eud <- df_eud %>% drop_na(oc_lng)
 
-var_list = list()
-dist_list = list()
-
-# for loop takes 3.1 minute to run. times taken at 22 evening, no rush hour
-# could be nice to specify monday morning at 7 o clock
-start_time <- Sys.time()
-for (row in 1:nrow(df)) {
-    school_long <- df[row, "long"]
-    school_lat  <- df[row, "lat"]
-    school_name <- df[row, "Institution"]
-    
-    kom_long <- df[row, "oc_lng"]
-    kom_lat  <- df[row, "oc_lat"]
-    kom_name <- df[row, "Kommune"]
-    
-    cat(school_name,'------>', kom_name, '\n')
-    print(row +1)
-
-    route <- mb_directions(
-      origin = c(school_long, school_lat),
-      destination = c(kom_long, kom_lat),
-      profile = "driving")
-    
-    dist_list[[row]] <- route
-    var_list[[row]] <- c(school_name, kom_name)
+# Takes 3.1 minute for gym, 1.2 for eud. times taken at 13 weekend, no rush hour
+get_distance <- function(df) {
+  var_list = list()
+  dist_list = list()
+  
+  start_time <- Sys.time()
+  for (row in 1:nrow(df)) {
+      school_long <- df[row, "long"]
+      school_lat  <- df[row, "lat"]
+      school_name <- df[row, "Institution"]
+      
+      kom_long <- df[row, "oc_lng"]
+      kom_lat  <- df[row, "oc_lat"]
+      kom_name <- df[row, "Kommune"]
+      
+      cat(school_name,'------>', kom_name, '\n')
+      print(row +1)
+  
+      route <- mb_directions(
+        origin = c(school_long, school_lat),
+        destination = c(kom_long, kom_lat),
+        profile = "driving") 
+      
+      dist_list[[row]] <- route
+      var_list[[row]] <- c(school_name, kom_name)
+    }
+  end_time <- Sys.time()
+  print(end_time - start_time)
+  
+  results <- list("variables" = var_list, "distances" = dist_list)
+  return(results)
 }
-end_time <- Sys.time()
-end_time - start_time
 
+# apply function to gym and eud dataframes
+result_eud <- get_distance(df_eud)
+result_gym <- get_distance(df_gym)
 
 # gather the results into one SF dataframe
-var_df <- do.call(rbind, var_list) %>%
+var_df_eud <- do.call(rbind, result_eud$variables) %>%
   as.data.frame()
+dist_sf_eud <- dplyr::bind_rows(result_eud$distances)
+dist_sf_eud <- cbind(dist_sf_eud, var_df_eud)
 
-dist_sf <- dplyr::bind_rows(dist_list)
+var_df_gym <- do.call(rbind, result_gym$variables) %>%
+  as.data.frame()
+dist_sf_gym <- dplyr::bind_rows(result_gym$distances)
+dist_sf_gym <- cbind(dist_sf_gym, var_df_gym)
 
-df3 <- as.data.frame(dist_sf) %>% 
+# save copy of distances including geometry shape of the paths chosen
+st_write(dist_sf_eud, "data/preprocessed/dist_eud_mun.shp")
+st_write(dist_sf_gym, "data/preprocessed/dist_gym_mun.shp")
+
+# append to existing dataframe
+df2 <- as.data.frame(dist_sf_gym) %>% 
   dplyr::select(-geometry)
+df_gym <- cbind(df_gym, df2)
 
-df <- cbind(df, df3)
+df2 <- as.data.frame(dist_sf_eud) %>% 
+  dplyr::select(-geometry)
+df_eud <- cbind(df_eud, df2)
 
-dist_sf <- cbind(dist_sf, var_df)
+## create gathered df
+df_gym <- df_gym %>% 
+  mutate(Undergruppe = NA) %>% 
+  rename(Gruppe = Mellemgruppe)
 
-#st_write(dist_df, "data/preprocessed/dist_school_mun.shp")
-#write.csv(df, "data/preprocessed/all_distances_GYM.csv")
-
-#########
-
-map %>% 
-      addCircleMarkers(df_small$long, df_small$lat, 
-                   radius = 4,
-                   color = 'black',
-                   popup = df_small$Institution) %>% 
-  
-  addPolylines(data=dist_df, color = "green", opacity = 1) %>% 
-  
-  addPolylines(data=municipalities_sf,
-                     color = 'grey',
-                     label = municipalities_sf$NAME_2)
-
-
+df <- full_join(df_gym, df_eud)
+df2 <- df
 ```
+
+Getting some descriptive statistics on the final data.
+
+```{r}
+# get municipality student sum
+Mun_summary <- df %>% 
+  group_by(Kommune) %>% 
+  summarise(Mun_sum = sum(Stud_18))
+
+df <- df %>% left_join(Mun_summary, by = 'Kommune')
+
+df <- df %>% mutate(Mun_percent = round((Stud_18 / Mun_sum), digits = 3))
+
+# percent of municipality that chose which main area
+df$Mun_main <- paste(df$Kommune, df$Hovedområde)
+
+Main_summary <- df %>% 
+  group_by(Mun_main) %>% 
+  summarise(Mun_main_sum = sum(Stud_18))
+
+df <- df %>% left_join(Main_summary, by = 'Mun_main')
+
+df <- df %>% mutate(Mun_main_percent = round((Mun_main_sum / Mun_sum), digits = 3))
+
+# percent of municipality that chose which group
+df$Mun_group <- paste(df$Kommune, df$Gruppe)
+
+Group_summary <- df %>% 
+  group_by(Mun_group) %>% 
+  summarise(Mun_group_sum = sum(Stud_18))
+
+df <- df %>% left_join(Group_summary, by = 'Mun_group')
+
+df <- df %>% mutate(Mun_group_percent = round((Mun_group_sum / Mun_sum), digits = 3))
+
+# save the results
+write_csv(df, 'data/preprocessed/all_results.csv')
+df <- read_csv('data/preprocessed/all_results.csv')
+
+# creating a distinct education data frame for the interactive map
+df_edu <- distinct(df, Institution, Gruppe, .keep_all = TRUE)
+
+# Find a center point for each municipality for the interactive map
+centers <- data.frame(gCentroid(municipalities, byid = TRUE))
+centers$mun <- municipalities$NAME_2
+```
+
 
 what is the minimum travel time to each education, by municipality?
 ```{r}
 # creating a df that only keeps the min distance values for each municipality and group
 df_min <- df %>% 
-  group_by(Kommune, Mellemgruppe)%>% 
+  group_by(Kommune, Gruppe)%>% 
   slice(which.min(duration))
 
+df_min <- df_min %>% 
+  mutate(Gruppe = factor(Gruppe, levels = c('CHP', 'ACB', 'FAH', 'TCT', 'Stx', 'Hf', 'Hhx', 'Htx', 'Øvrige')))
+
+# min distance for each municipality and main area
+df_main <- df %>% 
+  group_by(Kommune, Hovedområde)%>% 
+  slice(which.min(duration))
+
+df_main <- df_main %>% 
+  mutate(Gruppe = factor(Gruppe, levels = c('CHP', 'ACB', 'FAH', 'TCT', 'Stx', 'Hf', 'Hhx', 'Htx', 'Øvrige'))) %>% 
+  mutate(Education = factor(Hovedområde, levels = c('Gymnasiale uddannelser', 'Erhvervsfaglige uddannelser')))
+
+
+# Difference in distance by main area and group
+df <- df %>% 
+  mutate(Gruppe = factor(Gruppe, levels = c('CHP', 'ACB', 'FAH', 'TCT', 'Stx', 'Hf', 'Hhx', 'Htx', 'Øvrige')))
+
+df %>% group_by(Hovedområde) %>% 
+  summarise(mean(distance))
+
+df %>% group_by(Gruppe) %>% 
+  summarise(mean(distance))
+```
+
+
+Creating interactive map with Leaflet():
+
+```{r}
+# creating a separate dataset for each layer in the interactive plot
+stx = df_edu %>% filter(Gruppe == 'Stx')
+hf = df_edu %>% filter(Gruppe == 'Hf')
+htx = df_edu %>% filter(Gruppe == 'Htx')
+hhx = df_edu %>% filter(Gruppe == 'Hhx')
+chp = df_edu %>% filter(Gruppe == 'CHP')
+acb = df_edu %>% filter(Gruppe == 'ACB')
+fah = df_edu %>% filter(Gruppe == 'FAH')
+tct = df_edu %>% filter(Gruppe == 'TCT')
+
+
+# using mapbox tiles as this is a license requirement if i plot any of the distances
+map <- leaflet() %>%
+  addMapboxTiles(style_id = "light-v10", #alternative, streets-v11: The core Mapbox basemap
+                 username = "mapbox") 
+
+map %>%  
+  addPolylines(data = municipalities_sf,
+    stroke=TRUE, 
+    fillOpacity = 1,
+    color = 'black',
+    weight=0.4) %>% 
+  
+  addLabelOnlyMarkers(data = centers,
+                    lng = ~x, lat = ~y, label = ~mun,
+                    labelOptions = labelOptions(noHide = TRUE, direction = 'top',
+                                                textOnly = TRUE,
+                                                textsize = '7.5px')) %>%
+  # stx
+  addCircleMarkers(stx$long,
+                   stx$lat,
+                   radius = 4,
+                   color = 'turquoise',
+                   group = 'STX',
+                   popup = paste0(stx$Institution, "<br/>Type: ", stx$Gruppe)) %>%
+  # hf
+  addCircleMarkers(hf$long,
+                   hf$lat,
+                   radius = 4,
+                   color = 'blue',
+                   group = 'HF',
+                   popup = paste0(hf$Institution, "<br/>Type: ", hf$Gruppe)) %>%
+    # hhx
+  addCircleMarkers(hhx$long,
+                   hhx$lat,
+                   radius = 4,
+                   color = 'purple',
+                   group = 'HHX',
+                   popup = paste0(hhx$Institution, "<br/>Type: ", hhx$Gruppe)) %>%
+    # htx
+  addCircleMarkers(htx$long,
+                   htx$lat,
+                   radius = 4,
+                   color = 'pink',
+                   group = 'HTX',
+                   popup = paste0(htx$Institution, "<br/>Type: ", htx$Gruppe)) %>%
+    # CHP
+  addCircleMarkers(chp$long,
+                   chp$lat,
+                   radius = 4,
+                   color = 'red',
+                   group = 'CHP',
+                   popup = paste0(chp$Institution, "<br/>Type: ", chp$Gruppe)) %>%
+    # acb
+  addCircleMarkers(acb$long,
+                   acb$lat,
+                   radius = 4,
+                   color = 'orange',
+                   group = 'ACB',
+                   popup = paste0(acb$Institution, "<br/>Type: ", acb$Gruppe)) %>%
+    # fah
+  addCircleMarkers(fah$long,
+                   fah$lat,
+                   radius = 4,
+                   color = 'yellow',
+                   group = 'FAH',
+                   popup = paste0(fah$Institution, "<br/>Type: ", fah$Gruppe)) %>%
+    # tct
+  addCircleMarkers(tct$long,
+                   tct$lat,
+                   radius = 4,
+                   color = 'green',
+                   group = 'TCT',
+                   popup = paste0(tct$Institution, "<br/>Type: ", tct$Gruppe)) %>%
+
+  
+  # add layer control
+  addLayersControl(overlayGroups = c('STX', 'HF', 'HHX', 'HTX', 'CHP', 'ACB', 'FAH', 'TCT'),
+                   options = layersControlOptions(collapsed = FALSE))
+
+```
+
+identify the municipalities that have difficulty in accessing all 8 types:
+
+```{r}
+df_access <- df_min %>% 
+  filter(distance >= 50, Gruppe != 'Øvrige') %>% 
+  mutate(Kommune = factor(Kommune),
+         distance = round(distance)) %>% 
+  dplyr::select(Region, Kommune, Gruppe, Hovedområde, distance, duration)
+
+levels(df_access$Kommune)
+write_csv(df_access, 'data/preprocessed/bad_access_muns.csv')
+```
+
+
+Plotting results:
+
+```{r}
 # plotting with the percentage of the municipality that chose which group
-df_min_nj <- df_min %>% filter(Region == 'Region Nordjylland')
 
-ggplot(data = NULL, aes(group = Mellemgruppe)) +
-  geom_bar(data=df_min_nj, 
-           aes(fill=Mellemgruppe, y=duration, x=Kommune), position="dodge", stat="identity") +
-  geom_point(data=df_min_nj, 
-             aes(y=Mun_mel_percent*15, x=Kommune, group=Mellemgruppe), position = position_dodge(width = 0.9), shape=3, size=4, show.legend=FALSE) +
-  ggtitle('The minimum driving duration to each education type from each municipality')
+plot_groups <- function(df) {
+ggplot(data = NULL, aes(group = Gruppe)) +
+  geom_bar(data=df, 
+           aes(fill=Gruppe, y=distance, x=Kommune), position="dodge", stat="identity") +
+  geom_point(data=df, 
+             aes(y=Mun_group_percent*25, x=Kommune, group=Gruppe), position = position_dodge(width = 0.9), shape=3, size=4, show.legend=FALSE) + 
+    xlab('Municipality') + ylab('Distance (km)') +
+  ggtitle('The minimum distance to each education group from each municipality')
+}
+
+# fitting plot function by region
+df_min %>% 
+  # esxcluding Læsø from the plot as it severely distorts the plot (outlier)
+  filter(Region == 'Region Nordjylland', Kommune != 'Læsø', Gruppe != 'Øvrige') %>%
+  plot_groups()
+
+df_min %>% 
+  filter(Region == 'Region Midtjylland', Gruppe != 'Øvrige') %>% 
+  plot_groups()
+
+df_min %>% 
+  filter(Region == 'Region Syddanmark', Gruppe != 'Øvrige') %>% 
+  plot_groups()
+
+df_min %>% 
+  filter(Region == 'Region Sjælland', Gruppe != 'Øvrige') %>% 
+  plot_groups()
+
+df_min %>% 
+  filter(Region == 'Region Hovedstaden', Gruppe != 'Øvrige') %>% 
+  plot_groups()
 
 
+# plot for the main group
+plot_main <- function(df) {
+ggplot(data = NULL, aes(group = Education)) +
+  geom_bar(data=df, 
+           aes(fill=Education, y=distance, x=Kommune), position="dodge", stat="identity") +
+  geom_point(data=df, 
+             aes(y=Mun_main_percent*20, x=Kommune, group=Education), position = position_dodge(width = 0.9), shape=3, size=4, show.legend=FALSE) +
+  labs(title = "The minimum distance to each education type from each municipality", x = "Municipality", y = "Distance (km)", color = "Education\n")+
+    scale_fill_discrete(labels = c("GE", "VET"))
+}
 
-df_min_nj <- df_min %>% filter(Region == 'Region Syddanmark')
+# plotting by region
 
-ggplot(data = NULL, aes(group = Mellemgruppe)) +
-  geom_bar(data=df_min_nj, 
-           aes(fill=Mellemgruppe, y=duration, x=Kommune), position="dodge", stat="identity") +
-  geom_point(data=df_min_nj, 
-             aes(y=Mun_mel_percent*15, x=Kommune, group=Mellemgruppe), position = position_dodge(width = 0.9), shape=3, size=4, show.legend=FALSE) +
-  ggtitle('The minimum driving duration to each education type from each municipality')
+df_main %>% 
+  filter(Region == 'Region Nordjylland', Kommune != 'Læsø') %>% 
+  plot_main()
 
+df_main %>% 
+  filter(Region == 'Region Midtjylland') %>% 
+  plot_main()
+
+df_main %>% 
+  filter(Region == 'Region Syddanmark') %>% 
+  plot_main()
+
+df_main %>% 
+  filter(Region == 'Region Sjælland') %>% 
+  plot_main()
+
+df_main %>% 
+  filter(Region == 'Region Hovedstaden') %>% 
+  plot_main()
 
 ```
 
