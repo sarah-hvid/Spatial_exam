@@ -1,9 +1,9 @@
-# Spatial Analytics - Youth educations in Denmark
+# Spatial Analytics Exam - Youth educations in Denmark
  
 In this project youth educations in Denmark were explored from a spatial analytical perspective by a municipal level.\
 
 ## Methods
-**OpenCage**\ 
+**OpenCage**\
 This project made use of the ```OpenCage``` package's forward geocoding functions. ```OpenCage``` is an API service, which means that the user needs to register to get an API key. The key need to be set in the R environment to reproduce the geocoding conducted in this project. A thorough guide to this process is available within their [vignette](https://cran.r-project.org/web/packages/opencage/vignettes/opencage.html) (Possenreide et al., 2021). ```OpenCage``` was used to gather the coordinates of all institutions and the coordinates of all municipalities in Denmark.\
 \
 **Mapboxapi**\
@@ -24,6 +24,14 @@ All outputs of the script may be seen in the ```output``` folder.
 ## Results
 An interactive map was created with ```Leaflet``` and ```Mapboxapi``` allowing the user to see all youth education institutions in Denmark. The interactivity of the map allows the user to toggle visibility and thereby find relevant or irrelevant educations by municipality. It therefore serves as a tool from several different viewpoints. This project also found that VET educations were generally less available in several municipalities than GE educations. The availability of an education was specified as low if the distance to it from a municipality was greater than 50 kilometers. At least 23 out of 98 municipalities had low-access youth educations. These educations were primarily the Care, health and pedagogy and Food, agriculture and hospitality vocational educations.\
 \
+**Interactive map**
+
+![image](/output/leaflet_static.png)
+
+**Distance table**
+
+![image](/output/distance_table.png)
+
 **Nordjylland**
 
 ![image](/output/nordjylland_main.png)
@@ -37,4 +45,5 @@ Possenreide, D., Sadler, J., & Salmon, M. (2021). Introduction to opencage [R].
 Walker, K. (2020, October 9). Penn MUSA Masterclass 2020. 
   http://walker-data.com/MUSAmasterclass/tutorial/#421_Obtaining_demographic_data_with_tidycensus
 
-
+## Contact
+Sarah Hvid Andersen (201910230) - 201910230@post.au.dk
