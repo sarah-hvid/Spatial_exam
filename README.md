@@ -1,6 +1,6 @@
 # Spatial Analytics Exam - Youth educations in Denmark
  
-In this project youth educations in Denmark were explored from a spatial analytical perspective by a municipal level.\
+In this project youth educations in Denmark were explored from a spatial analytical perspective by a municipal level.
 
 ## Methods
 **OpenCage**\
